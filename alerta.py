@@ -41,6 +41,37 @@ def preco_btc_usd():
 
 
 def notificar(topico, titulo, msg, prioridade="high"):
+    """Envia pelo Telegram e pelo ntfy (o que estiver configurado).
+    Basta um canal funcionar; se todos falharem, gera erro (o alvo nao e
+    marcado como avisado e a proxima execucao tenta de novo)."""
+    canais = []
+    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
+    chat = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if token and chat:
+        canais.append(("Telegram", lambda: enviar_telegram(token, chat, titulo, msg)))
+    if topico:
+        canais.append(("ntfy", lambda: enviar_ntfy(topico, titulo, msg, prioridade)))
+    ok = False
+    for nome, enviar in canais:
+        try:
+            enviar()
+            ok = True
+            print(f"Enviado via {nome}.")
+        except Exception as e:
+            print(f"Falha ao enviar via {nome}: {e}")
+    if not ok:
+        sys.exit("Nenhum canal de notificacao funcionou.")
+
+
+def enviar_telegram(token, chat, titulo, msg):
+    dados = json.dumps({"chat_id": chat, "text": f"🚨 {titulo}\n\n{msg}"}).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=dados, headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(req, timeout=20)
+
+
+def enviar_ntfy(topico, titulo, msg, prioridade):
     req = urllib.request.Request(
         f"https://ntfy.sh/{topico}",
         data=msg.encode("utf-8"),
@@ -61,8 +92,8 @@ def fmt(v):
 def main():
     topico = os.environ.get("NTFY_TOPIC", "").strip()
     alvos_txt = os.environ.get("PRECO_ALVO", "").strip()
-    if not topico or not alvos_txt:
-        sys.exit("Configure o secret NTFY_TOPIC e a variable PRECO_ALVO.")
+    if not alvos_txt:
+        sys.exit("Configure a variable PRECO_ALVO.")
     # aceita "70000" ou "70000, 65000" (ou separado por ponto e virgula)
     partes = alvos_txt.replace(";", ",").replace(" ", "").split(",")
     alvos = sorted({float(p) for p in partes if p}, reverse=True)
